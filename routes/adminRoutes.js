@@ -4,6 +4,7 @@ const adminController = require('../controllers/adminController');
 const { verifyAdmin } = require('../middlewares/adminAuthMiddleware');
 const { getAdminDashboard, getAllCompaniesWithCount, getAllDevicesWithCompany, getDevicesByCompanyId, getCompaniesWithDeviceCount, setDevicePFRange, getPFRangeByDeviceId, getAllPFRanges } = require('../controllers/adminController');
 const { verifyAdminOrCompany } = require('../middlewares/adminOrCompanyMiddleware');
+
 // Register and Login
 router.post('/register', adminController.registerAdmin);
 router.post('/login', adminController.loginAdmin);

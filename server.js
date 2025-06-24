@@ -1,3 +1,4 @@
+const path = require('path');
 require('./cornjob');
 require('./dailySummaryJob');
 require('./monthlyCronjob');
@@ -43,6 +44,8 @@ app.use('/api/summary', dailySummaryRoutes);
 app.use('/api', monthlySummaryRoutes);
 app.use('/api', alertRoutes);
 app.use('/api/alerts', alertRoutesid);
+app.use('/files', express.static(path.join(__dirname, 'public/files')));
+
 
 
 
