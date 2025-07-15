@@ -48,11 +48,13 @@ exports.markAlertAsRead = async (req, res) => {
   }
 };
 
-
 exports.getAllAlertsadmin = async (req, res) => {
   const query = `
-    SELECT * FROM alerts where admin_status = 'unread'
-    ORDER BY created_at DESC
+    SELECT a.*, d.company_id
+    FROM alerts a
+    JOIN devices d ON a.device_id = d.device_id
+    WHERE a.admin_status = 'unread'
+    ORDER BY a.created_at DESC
   `;
 
   db.query(query, (err, results) => {
@@ -60,6 +62,7 @@ exports.getAllAlertsadmin = async (req, res) => {
     return res.status(200).json(results);
   });
 };
+
 
 exports.markAlertAsReadadmin = async (req, res) => {
   const { alert_id } = req.params;

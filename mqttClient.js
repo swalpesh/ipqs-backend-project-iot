@@ -17,7 +17,7 @@ const mqttOptions = {
 
 const client = mqtt.connect(process.env.MQTT_BROKER_URL, mqttOptions);
 let ackCounter = 0;
-const lastInsertTimestamps = {}; // Per-device timestamp tracker
+const lastInsertTimestamps = {};
 
 server.listen(process.env.SOCKET_PORT || 4000, () => {
   console.log(`🚀 Socket.IO server running on port ${process.env.SOCKET_PORT || 4000}`);
@@ -41,7 +41,6 @@ client.on('message', async (topic, message) => {
     const parsed = JSON.parse(message.toString());
     const { type, device_id, msg_id, timestamp, data, config } = parsed;
 
-    // ✅ Auto-store settings when received
     if (type === 'settings' && device_id && config) {
       try {
         await new Promise((resolve, reject) => {
@@ -77,8 +76,7 @@ client.on('message', async (topic, message) => {
           ];
           db.query(insertQuery, values, (err) => {
             if (err) return reject(err);
-            console.log(`✅ Settings stored for device ${device_id}`);
-            io.emit(`device-settings-${device_id}`, config); // optional
+            io.emit(`device-settings-${device_id}`, config);
             resolve();
           });
         });
@@ -88,13 +86,11 @@ client.on('message', async (topic, message) => {
       return;
     }
 
-    // ✅ Skip irrelevant or malformed messages
     if (type === 'cmd_ack' || type !== 'measurement' || !device_id || !data) return;
 
     const timestamp_utc = timestamp || null;
     const ts_unix = data.TS || null;
 
-    // 🔍 Validate device based on topic and status
     const [device] = await new Promise((resolve, reject) => {
       const query = 'SELECT * FROM devices WHERE device_id = ? AND topic_name = ? AND status = "active"';
       db.query(query, [device_id, topic], (err, results) => {
@@ -103,12 +99,50 @@ client.on('message', async (topic, message) => {
       });
     });
 
-    if (!device) {
-      console.warn(`⚠️ Device ${device_id} not found, topic mismatch, or inactive`);
-      return;
+    if (!device) return;
+
+    const powerFactor = parseFloat(data['powerfactor']) || 0;
+    const min_pf = parseFloat(device.min_pf);
+    const max_pf = parseFloat(device.max_pf);
+
+    // ✅ DEBUG: Check PF comparison
+    // console.log(`[DEBUG] PF Check for ${device_id}:`, {
+    //   min_pf,
+    //   max_pf,
+    //   current_pf: powerFactor,
+    //   isOutOfRange: powerFactor < min_pf || powerFactor > max_pf
+    // });
+
+    // 🚨 Insert Live Alert if PF Out of Range
+    if (!isNaN(min_pf) && !isNaN(max_pf) && (powerFactor < min_pf || powerFactor > max_pf)) {
+      const hour = new Date(timestamp_utc);
+      hour.setMinutes(0, 0, 0); // round to start of hour
+
+      const alertQuery = `
+        INSERT INTO alerts (
+          device_id, hour, timestamp_utc, kwh_now, kvah_now,
+          kvarh_lag_now, kvarh_lead_now, calculated_pf, type, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'live', NOW())
+      `;
+      const alertValues = [
+        device_id,
+        hour,
+        timestamp_utc,
+        parseFloat(data['Kwh']) || 0,
+        parseFloat(data['kvah']) || 0,
+        parseFloat(data['Kvarhlag']) || 0,
+        parseFloat(data['Kvarhlead']) || 0,
+        powerFactor
+      ];
+
+      db.query(alertQuery, alertValues, (err) => {
+        if (err) {
+          console.error(`❌ LIVE Alert insert error for ${device_id}:`, err.message);
+        }
+      });
     }
 
-    // 🧠 Prevent duplicate inserts within 5 minutes
+    // 🧠 Insert to device_data every 5 minutes only
     const now = Date.now();
     const lastInsert = lastInsertTimestamps[device_id] || 0;
     const interval = 5 * 60 * 1000;
@@ -122,7 +156,6 @@ client.on('message', async (topic, message) => {
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
       `;
-
       const values = [
         device_id,
         topic,
@@ -137,9 +170,8 @@ client.on('message', async (topic, message) => {
         parseFloat(data['Kvarhlead']) || 0,
         parseFloat(data['kvah']) || 0,
         parseFloat(data['kvar']) || 0,
-        parseFloat(data['powerfactor']) || 0
+        powerFactor
       ];
-
       db.query(insertQuery, values, (err) => {
         if (err) {
           console.error('❌ DB Insert Error:', err.message);
@@ -149,7 +181,7 @@ client.on('message', async (topic, message) => {
       });
     }
 
-    // 🌐 Emit data to frontend
+    // 🌐 Emit live data to frontend
     const livePayload = {
       device_id,
       voltage: parseFloat(data['Voltage']) || 230,
@@ -160,7 +192,7 @@ client.on('message', async (topic, message) => {
       kvarhlead: parseFloat(data['Kvarhlead']) || 0,
       kvah: parseFloat(data['kvah']) || 0,
       kvar: parseFloat(data['kvar']) || 0,
-      power_factor: parseFloat(data['powerfactor']) || 0,
+      power_factor: powerFactor,
     };
     io.emit(`device-data-${device_id}`, livePayload);
 
