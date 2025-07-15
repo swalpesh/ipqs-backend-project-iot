@@ -2,7 +2,7 @@ const db = require('../models/db');
 
 exports.getAllAlerts = async (req, res) => {
   const query = `
-    SELECT * FROM alerts where user_status = 'unread'
+    SELECT * FROM alerts where user_status = 'unread' and type = 'hourly'
     ORDER BY created_at DESC
   `;
 
