@@ -27,6 +27,19 @@ io.on('connection', (socket) => {
   console.log('🟢 Web client connected via Socket.IO');
 });
 
+function parseCustomTimestamp(ts) {
+  if (!ts || typeof ts !== 'string' || ts.length !== 14) return null;
+  const year = ts.slice(0, 4);
+  const month = ts.slice(4, 6);
+  const day = ts.slice(6, 8);
+  const hour = ts.slice(8, 10);
+  const minute = ts.slice(10, 12);
+  const second = ts.slice(12, 14);
+  const isoString = `${year}-${month}-${day}T${hour}:${minute}:${second}Z`;
+  const date = new Date(isoString);
+  return isNaN(date.getTime()) ? null : date;
+}
+
 client.on('connect', () => {
   console.log('✅ Connected to MQTT broker');
 
@@ -104,84 +117,103 @@ client.on('message', async (topic, message) => {
     const powerFactor = parseFloat(data['powerfactor']) || 0;
     const min_pf = parseFloat(device.min_pf);
     const max_pf = parseFloat(device.max_pf);
+    const lead_min_pf = parseFloat(device.lead_min_pf);
+    const lead_max_pf = parseFloat(device.lead_max_pf);
 
-    // ✅ DEBUG: Check PF comparison
-    // console.log(`[DEBUG] PF Check for ${device_id}:`, {
-    //   min_pf,
-    //   max_pf,
-    //   current_pf: powerFactor,
-    //   isOutOfRange: powerFactor < min_pf || powerFactor > max_pf
-    // });
+    const isLagOutOfRange = !isNaN(min_pf) && !isNaN(max_pf) && (powerFactor < min_pf || powerFactor > max_pf);
+    const isLeadOutOfRange = !isNaN(lead_min_pf) && !isNaN(lead_max_pf) && (powerFactor < lead_min_pf || powerFactor > lead_max_pf);
 
-    // 🚨 Insert Live Alert if PF Out of Range
-    if (!isNaN(min_pf) && !isNaN(max_pf) && (powerFactor < min_pf || powerFactor > max_pf)) {
-      const hour = new Date(timestamp_utc);
-      hour.setMinutes(0, 0, 0); // round to start of hour
+    if (isLagOutOfRange && isLeadOutOfRange) {
+      const hourDate = parseCustomTimestamp(timestamp_utc);
+      if (hourDate) {
+        hourDate.setMinutes(0, 0, 0);
 
-      const alertQuery = `
-        INSERT INTO alerts (
-          device_id, hour, timestamp_utc, kwh_now, kvah_now,
-          kvarh_lag_now, kvarh_lead_now, calculated_pf, type, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'live', NOW())
-      `;
-      const alertValues = [
-        device_id,
-        hour,
-        timestamp_utc,
-        parseFloat(data['Kwh']) || 0,
-        parseFloat(data['kvah']) || 0,
-        parseFloat(data['Kvarhlag']) || 0,
-        parseFloat(data['Kvarhlead']) || 0,
-        powerFactor
-      ];
+        const alertQuery = `
+          INSERT INTO alerts (
+            device_id, hour, timestamp_utc, kwh_now, kvah_now,
+            kvarh_lag_now, kvarh_lead_now, calculated_pf, type, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'live', NOW())
+        `;
+        const alertValues = [
+          device_id,
+          hourDate,
+          timestamp_utc,
+          parseFloat(data['Kwh']) || 0,
+          parseFloat(data['kvah']) || 0,
+          parseFloat(data['Kvarhlag']) || 0,
+          parseFloat(data['Kvarhlead']) || 0,
+          powerFactor
+        ];
 
-      db.query(alertQuery, alertValues, (err) => {
-        if (err) {
-          console.error(`❌ LIVE Alert insert error for ${device_id}:`, err.message);
-        }
-      });
+        db.query(alertQuery, alertValues, (err) => {
+          if (err) {
+            console.error(`❌ LIVE Alert insert error for ${device_id}:`, err.message);
+          }
+        });
+      } else {
+        console.warn(`⚠️ Invalid timestamp format for alert (device ${device_id}): ${timestamp_utc}`);
+      }
     }
 
-    // 🧠 Insert to device_data every 5 minutes only
     const now = Date.now();
     const lastInsert = lastInsertTimestamps[device_id] || 0;
     const interval = 5 * 60 * 1000;
 
     if (now - lastInsert >= interval) {
-      const insertQuery = `
-        INSERT INTO device_data (
-          device_id, topic_name, msg_id, timestamp_utc, ts_unix,
-          voltage, current, kw, kwh, kvarhlag,
-          kvarhlead, kvah, kvar, power_factor, created_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
-      `;
-      const values = [
-        device_id,
-        topic,
-        msg_id,
-        timestamp_utc,
-        ts_unix,
-        parseFloat(data['Voltage']) || 0,
-        parseFloat(data['Current']) || 0,
-        parseFloat(data['KW']) || 0,
-        parseFloat(data['Kwh']) || 0,
-        parseFloat(data['Kvarhlag']) || 0,
-        parseFloat(data['Kvarhlead']) || 0,
-        parseFloat(data['kvah']) || 0,
-        parseFloat(data['kvar']) || 0,
-        powerFactor
-      ];
-      db.query(insertQuery, values, (err) => {
-        if (err) {
-          console.error('❌ DB Insert Error:', err.message);
-        } else {
-          lastInsertTimestamps[device_id] = now;
+      const currentKwh = parseFloat(data['Kwh']) || 0;
+
+      db.query(
+        'SELECT kwh FROM device_data WHERE device_id = ? ORDER BY created_at DESC LIMIT 1',
+        [device_id],
+        (err, results) => {
+          if (err) {
+            console.error(`❌ Failed to fetch last KWH for ${device_id}:`, err.message);
+            return;
+          }
+
+          const lastKwh = results[0]?.kwh || 0;
+
+          if (currentKwh > lastKwh) {
+            const insertQuery = `
+              INSERT INTO device_data (
+                device_id, topic_name, msg_id, timestamp_utc, ts_unix,
+                voltage, current, kw, kwh, kvarhlag,
+                kvarhlead, kvah, kvar, power_factor, created_at
+              )
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+            `;
+            const values = [
+              device_id,
+              topic,
+              msg_id,
+              timestamp_utc,
+              ts_unix,
+              parseFloat(data['Voltage']) || 0,
+              parseFloat(data['Current']) || 0,
+              parseFloat(data['KW']) || 0,
+              currentKwh,
+              parseFloat(data['Kvarhlag']) || 0,
+              parseFloat(data['Kvarhlead']) || 0,
+              parseFloat(data['kvah']) || 0,
+              parseFloat(data['kvar']) || 0,
+              powerFactor
+            ];
+
+            db.query(insertQuery, values, (err) => {
+              if (err) {
+                console.error('❌ DB Insert Error:', err.message);
+              } else {
+                console.log(`✅ Inserted 5-min data for ${device_id} with KWh: ${currentKwh}`);
+                lastInsertTimestamps[device_id] = now;
+              }
+            });
+          } else {
+            console.log(`⏭️ Skipped insertion for ${device_id} — KWh ${currentKwh} <= last KWh ${lastKwh}`);
+          }
         }
-      });
+      );
     }
 
-    // 🌐 Emit live data to frontend
     const livePayload = {
       device_id,
       voltage: parseFloat(data['Voltage']) || 230,
@@ -196,7 +228,6 @@ client.on('message', async (topic, message) => {
     };
     io.emit(`device-data-${device_id}`, livePayload);
 
-    // 📨 Send ACK every 7th/8th message only
     ackCounter++;
     if (ackCounter % 7 === 0 || ackCounter % 8 === 0) return;
 

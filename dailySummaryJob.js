@@ -75,13 +75,12 @@
 
 
 // File: cronjobs/dailySummaryJob.js
-
 require('dotenv').config();
 const cron = require('node-cron');
 const db = require('./models/db');
 const moment = require('moment-timezone');
 
-// Retry wrapper
+// Retry wrapper for DB queries
 function retryQuery(query, values = [], retries = 3, delay = 2000) {
   return new Promise((resolve, reject) => {
     const attempt = (remaining) => {
@@ -98,7 +97,6 @@ function retryQuery(query, values = [], retries = 3, delay = 2000) {
 }
 
 async function computeDailySummary() {
-  // Use IST time zone explicitly
   const istNow = moment().tz('Asia/Kolkata');
   const startOfDay = istNow.clone().subtract(1, 'day').startOf('day').format('YYYY-MM-DD HH:mm:ss');
   const endOfDay = istNow.clone().subtract(1, 'day').endOf('day').format('YYYY-MM-DD HH:mm:ss');
@@ -111,7 +109,7 @@ async function computeDailySummary() {
 
     for (const { device_id } of devices) {
       const query = `
-        SELECT kwh, kvah, power_factor FROM device_data
+        SELECT kwh, kvah FROM device_data
         WHERE device_id = ? AND timestamp_utc BETWEEN ? AND ?
       `;
 
@@ -122,9 +120,12 @@ async function computeDailySummary() {
         continue;
       }
 
+      // Calculate average kWh and kVAh
       const avg_kwh = parseFloat((rows.reduce((sum, r) => sum + (r.kwh || 0), 0) / rows.length).toFixed(2));
       const avg_kvah = parseFloat((rows.reduce((sum, r) => sum + (r.kvah || 0), 0) / rows.length).toFixed(2));
-      const avg_pf = parseFloat((rows.reduce((sum, r) => sum + (r.power_factor || 0), 0) / rows.length).toFixed(3));
+
+      // Compute PF using avg_kwh / avg_kvah
+      let computed_pf = avg_kvah !== 0 ? parseFloat((avg_kwh / avg_kvah).toFixed(3)) : 0.0;
 
       const insertQuery = `
         INSERT INTO device_data_daily_summary 
@@ -138,21 +139,25 @@ async function computeDailySummary() {
         dayLabel,
         avg_kwh,
         avg_kvah,
-        avg_pf
+        computed_pf
       ]);
 
-      console.log(`✅ Stored daily summary for ${device_id} on ${dayLabel}`);
+      console.log(`✅ Stored daily summary for ${device_id} on ${dayLabel} | PF: ${computed_pf}`);
     }
   } catch (err) {
     console.error('[FATAL] Daily aggregation failed:', err.message);
   }
 }
 
-// Run at 12:10 AM IST daily
+// Run daily at 12:10 AM IST (UTC +5:30 = 18:40 UTC)
 cron.schedule('40 18 * * *', () => {
-  // Why 18:40 UTC? Because IST = UTC + 5:30
   console.log('\n⏰ Cron triggered for daily summary at 12:10 AM IST');
   computeDailySummary();
 });
+
+// if (require.main === module) {
+//   console.log('\n⚡ Manual test run of hourly aggregation');
+//   computeDailySummary();
+// }
 
 module.exports = { computeDailySummary };

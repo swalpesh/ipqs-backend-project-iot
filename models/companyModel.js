@@ -1,4 +1,3 @@
-// models/companyModel.js
 const db = require('./db');
 const bcrypt = require('bcryptjs');
 
@@ -8,9 +7,9 @@ const createCompany = async (company, superadminId) => {
         INSERT INTO companies (
             company_id, company_name, company_address, company_email, company_phone,
             company_city, company_state, company_country, company_username, company_password,
-            company_status, created_by, role
+            company_status, created_by, role, created_at, subscription_end
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     const values = [
         company.company_id,
@@ -25,7 +24,9 @@ const createCompany = async (company, superadminId) => {
         hashedPassword,
         company.company_status,
         superadminId,
-        'company' // fixed value set by backend
+        'company', // fixed value
+        company.created_at,
+        company.subscription_end
     ];
     return new Promise((resolve, reject) => {
         db.query(query, values, (err, result) => {
@@ -34,7 +35,6 @@ const createCompany = async (company, superadminId) => {
         });
     });
 };
-
 
 const getCompanyById = (company_id) => {
     return new Promise((resolve, reject) => {
@@ -99,10 +99,7 @@ const changeCompanyStatus = (company_id, status) => {
     });
 };
 
-
-
-// company login 
-
+// Company login
 const getCompanyByUsername = (username) => {
     return new Promise((resolve, reject) => {
         const query = 'SELECT * FROM companies WHERE company_username = ?';
@@ -112,8 +109,6 @@ const getCompanyByUsername = (username) => {
         });
     });
 };
-
-
 
 module.exports = {
     createCompany,

@@ -81,7 +81,6 @@
 
 
 // File: cronjobs/monthlySummaryJob.js
-
 require('dotenv').config();
 const cron = require('node-cron');
 const db = require('./models/db');
@@ -104,7 +103,7 @@ async function computeMonthlyAggregation() {
   const start = previousMonth.startOf('month').format('YYYY-MM-DD');
   const end = previousMonth.endOf('month').format('YYYY-MM-DD');
 
-  console.log(`📆 Monthly aggregation for: ${monthStr}`);
+  console.log(`\n📆 Monthly aggregation for: ${monthStr}`);
   console.log(`📅 Date range: ${start} → ${end}`);
 
   try {
@@ -113,8 +112,7 @@ async function computeMonthlyAggregation() {
     for (const device_id of deviceIds) {
       const query = `
         SELECT AVG(avg_kwh) AS avg_kwh,
-               AVG(avg_kvah) AS avg_kvah,
-               AVG(avg_power_factor) AS avg_power_factor
+               AVG(avg_kvah) AS avg_kvah
         FROM device_data_daily_summary
         WHERE device_id = ? AND date BETWEEN ? AND ?
       `;
@@ -127,10 +125,14 @@ async function computeMonthlyAggregation() {
       });
 
       const row = results[0];
-      if (!row || row.avg_kwh === null) {
+      if (!row || row.avg_kwh === null || row.avg_kvah === null) {
         console.warn(`[WARN] No data for device ${device_id} in ${monthStr}`);
         continue;
       }
+
+      const avg_kwh = parseFloat(row.avg_kwh.toFixed(2));
+      const avg_kvah = parseFloat(row.avg_kvah.toFixed(2));
+      const avg_power_factor = avg_kvah !== 0 ? parseFloat((avg_kwh / avg_kvah).toFixed(3)) : 0;
 
       const insertQuery = `
         INSERT INTO device_data_monthly_summary
@@ -142,9 +144,9 @@ async function computeMonthlyAggregation() {
         db.query(insertQuery, [
           device_id,
           monthStr,
-          parseFloat(row.avg_kwh.toFixed(2)),
-          parseFloat(row.avg_kvah.toFixed(2)),
-          parseFloat(row.avg_power_factor.toFixed(3))
+          avg_kwh,
+          avg_kvah,
+          avg_power_factor
         ], (err) => {
           if (err) {
             console.error(`[ERROR] Inserting monthly data failed for ${device_id}`, err);

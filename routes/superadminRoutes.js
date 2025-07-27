@@ -17,7 +17,7 @@ const { getDevicesByCompanyId } = require('../controllers/adminController');
 const { uploadFirmwareFile, getFirmwareFiles } = require('../controllers/otaController');
 const { broadcastFirmware } = require('../controllers/broadcastFirmwareController');
 const deviceSettingsController = require('../controllers/deviceSettingsController');
-
+const companyController = require('../controllers/companyController');
 
 
 // Enable file upload middleware for routes that need it
@@ -36,6 +36,7 @@ router.post('/companies/:company_id/assign-devices', verifySuperadmin, assignDev
 router.get('/devices/unassigned', verifySuperadmin, getUnassignedActiveDevices);
 router.post('/companies/:company_id/unassign-devices', verifySuperadmin, unassignDevicesFromCompany);
 router.get('/devices/sadmin/company/:company_id', verifySuperadmin, getDevicesByCompanyId);
+router.patch('/companies/:company_id/update-notification-status', verifySuperadmin, companyController.updateNotificationStatus);
 
 // ✅ OTA Firmware upload
 router.post('/upload-firmware', verifySuperadmin, uploadFirmwareFile);

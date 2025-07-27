@@ -254,9 +254,52 @@ exports.setDevicePFRange = (req, res) => {
   });
 };
 
+exports.setDeviceLeadPFRange = (req, res) => {
+  const { device_id } = req.params;
+  let { lead_min_pf, lead_max_pf } = req.body;
+
+  // Parse to float (in case coming as string from frontend)
+  lead_min_pf = parseFloat(lead_min_pf);
+  lead_max_pf = parseFloat(lead_max_pf);
+
+  // Check: lead_min_pf < 0 AND lead_max_pf <= 0
+  const isValidLeadPF = (value, allowZero = false) =>
+    typeof value === 'number' &&
+    !isNaN(value) &&
+    (allowZero ? value <= 0 : value < 0) &&
+    /^-?\d+(\.\d{1,3})?$/.test(value.toString());
+
+  if (!isValidLeadPF(lead_min_pf) || !isValidLeadPF(lead_max_pf, true)) {
+    return res.status(400).json({
+      message: 'lead_min_pf must be < 0 and lead_max_pf must be ≤ 0 with up to 3 decimal places',
+    });
+  }
+
+  const query = `
+    UPDATE devices
+    SET lead_min_pf = ?, lead_max_pf = ?
+    WHERE device_id = ?
+  `;
+
+  db.query(query, [lead_min_pf, lead_max_pf, device_id], (err, result) => {
+    if (err) {
+      console.error('Error updating PF range:', err);
+      return res.status(500).json({ message: 'Database error' });
+    }
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Device not found' });
+    }
+
+    res.status(200).json({ message: 'Power factor Lead range updated successfully' });
+  });
+};
+
+
+
 exports.getAllPFRanges = (req, res) => {
   const query = `
-    SELECT device_id, min_pf, max_pf 
+    SELECT device_id, min_pf, max_pf, lead_min_pf, lead_max_pf
     FROM devices
   `;
 
@@ -274,7 +317,7 @@ exports.getPFRangeByDeviceId = (req, res) => {
   const { device_id } = req.params;
 
   const query = `
-    SELECT device_id, min_pf, max_pf 
+    SELECT device_id, min_pf, max_pf, lead_min_pf, lead_max_pf 
     FROM devices 
     WHERE device_id = ?
   `;
