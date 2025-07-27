@@ -6,6 +6,7 @@ const { getAdminDashboard, getAllCompaniesWithCount, getAllDevicesWithCompany, g
 const { verifyAdminOrCompany } = require('../middlewares/adminOrCompanyMiddleware');
 const { getHourlyDataByDate } = require('../controllers/getHourlyDataByDate');
 const { getCompanyProfile } = require('../controllers/companyProfileController');
+const { getFullDayDeviceData } = require('../controllers/getFullDayDeviceData');
 
 
 
@@ -25,6 +26,12 @@ router.get('/devices/:device_id/pf-range', verifyAdmin, getPFRangeByDeviceId);
 router.get('/devices/pf-ranges', getAllPFRanges);
 router.get('/device/hourly-data',verifyAdmin, getHourlyDataByDate);
 router.get('/company/profile/:company_id',verifyAdmin, getCompanyProfile);
+
+router.get(
+  '/device/full-day-data',
+  verifyAdmin, // or any appropriate middleware
+  getFullDayDeviceData
+);
 
 
 module.exports = router;
