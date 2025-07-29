@@ -10,6 +10,7 @@ const { getFullDayDeviceData } = require('../controllers/getFullDayDeviceData');
 
 
 
+
 // Register and Login
 router.post('/register', adminController.registerAdmin);
 router.post('/login', adminController.loginAdmin);
@@ -32,6 +33,8 @@ router.get(
   verifyAdmin, // or any appropriate middleware
   getFullDayDeviceData
 );
+router.get('/top-performing-companies',verifyAdmin, adminController.getTopPerformingCompaniesWithDevices);
+router.put('/top-performing-company/:company_id', adminController.setTopPerformingCompany);
 
 
 module.exports = router;

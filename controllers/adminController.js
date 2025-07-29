@@ -335,3 +335,73 @@ exports.getPFRangeByDeviceId = (req, res) => {
     res.status(200).json(results[0]);
   });
 };
+
+exports.getTopPerformingCompaniesWithDevices = async (req, res) => {
+  const query = `
+    SELECT 
+      c.company_id,
+      c.company_name,
+      c.company_email,
+      c.top_performing_company,
+      d.device_id
+    FROM companies c
+    LEFT JOIN devices d ON c.company_id = d.company_id
+    WHERE c.top_performing_company = 'yes'
+    ORDER BY c.company_name ASC
+  `;
+
+  db.query(query, (err, results) => {
+    if (err) return res.status(500).json({ error: 'Database error: ' + err.message });
+
+    // Group results by company
+    const grouped = results.reduce((acc, row) => {
+      if (!acc[row.company_id]) {
+        acc[row.company_id] = {
+          company_id: row.company_id,
+          company_name: row.company_name,
+          company_email: row.company_email,
+          top_performing_company: row.top_performing_company,
+          devices: []
+        };
+      }
+
+      if (row.device_id) {
+        acc[row.company_id].devices.push({ device_id: row.device_id });
+      }
+
+      return acc;
+    }, {});
+
+    const output = Object.values(grouped);
+    return res.status(200).json(output);
+  });
+};
+
+
+
+exports.setTopPerformingCompany = (req, res) => {
+  const { company_id } = req.params;
+  const { top_performing_company } = req.body;
+
+  if (!['yes', 'no'].includes(top_performing_company)) {
+    return res.status(400).json({ error: 'Invalid top_performing_company value. Must be "yes" or "no".' });
+  }
+
+  const query = `
+    UPDATE companies 
+    SET top_performing_company = ? 
+    WHERE company_id = ?
+  `;
+
+  db.query(query, [top_performing_company, company_id], (err, result) => {
+    if (err) return res.status(500).json({ error: 'Database error: ' + err.message });
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Company not found' });
+    }
+
+    return res.status(200).json({ message: `Top performing status updated to '${top_performing_company}' for company ID ${company_id}` });
+  });
+};
+
+
