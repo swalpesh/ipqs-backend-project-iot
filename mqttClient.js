@@ -115,45 +115,8 @@ client.on('message', async (topic, message) => {
     if (!device) return;
 
     const powerFactor = parseFloat(data['powerfactor']) || 0;
-    const min_pf = parseFloat(device.min_pf);
-    const max_pf = parseFloat(device.max_pf);
-    const lead_min_pf = parseFloat(device.lead_min_pf);
-    const lead_max_pf = parseFloat(device.lead_max_pf);
 
-    const isLagOutOfRange = !isNaN(min_pf) && !isNaN(max_pf) && (powerFactor < min_pf || powerFactor > max_pf);
-    const isLeadOutOfRange = !isNaN(lead_min_pf) && !isNaN(lead_max_pf) && (powerFactor < lead_min_pf || powerFactor > lead_max_pf);
-
-    if (isLagOutOfRange && isLeadOutOfRange) {
-      const hourDate = parseCustomTimestamp(timestamp_utc);
-      if (hourDate) {
-        hourDate.setMinutes(0, 0, 0);
-
-        const alertQuery = `
-          INSERT INTO alerts (
-            device_id, hour, timestamp_utc, kwh_now, kvah_now,
-            kvarh_lag_now, kvarh_lead_now, calculated_pf, type, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'live', NOW())
-        `;
-        const alertValues = [
-          device_id,
-          hourDate,
-          timestamp_utc,
-          parseFloat(data['Kwh']) || 0,
-          parseFloat(data['kvah']) || 0,
-          parseFloat(data['Kvarhlag']) || 0,
-          parseFloat(data['Kvarhlead']) || 0,
-          powerFactor
-        ];
-
-        db.query(alertQuery, alertValues, (err) => {
-          if (err) {
-            console.error(`❌ LIVE Alert insert error for ${device_id}:`, err.message);
-          }
-        });
-      } else {
-        console.warn(`⚠️ Invalid timestamp format for alert (device ${device_id}): ${timestamp_utc}`);
-      }
-    }
+    // Removed live alert logic here
 
     const now = Date.now();
     const lastInsert = lastInsertTimestamps[device_id] || 0;
