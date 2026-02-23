@@ -43,16 +43,21 @@ function parseCustomTimestamp(ts) {
 client.on('connect', () => {
   console.log('✅ Connected to MQTT broker');
 
-  client.subscribe('#', (err) => {
-    if (err) console.error('❌ Subscription to # failed:', err.message);
-    else console.log('📡 Subscribed to: #');
+  const myTopic = 'ipqs/data'; 
+
+  client.subscribe(myTopic, (err) => {
+    if (err) {
+      console.error(`❌ Subscription to ${myTopic} failed:`, err.message);
+    } else {
+      console.log(`📡 Subscribed to: ${myTopic}`);
+    }
   });
 });
 
 client.on('message', async (topic, message) => {
   try {
     const parsed = JSON.parse(message.toString());
-    const { type, device_id, msg_id, timestamp, data, config } = parsed;
+    const { type, device_id, msg_id, timestamp, status, network_status, data, config } = parsed;
 
     if (type === 'settings' && device_id && config) {
       try {
@@ -73,19 +78,10 @@ client.on('message', async (topic, message) => {
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
           `;
           const values = [
-            device_id,
-            config.apn,
-            config.gprs_user,
-            config.gprs_pass,
-            config.mqtt_host,
-            config.mqtt_port,
-            config.mqtt_user,
-            config.mqtt_pass,
-            config.pub_topic,
-            config.sub_topic,
-            config.ack_topic,
-            config.interval_sec,
-            config.firmware_version
+            device_id, config.apn, config.gprs_user, config.gprs_pass,
+            config.mqtt_host, config.mqtt_port, config.mqtt_user, config.mqtt_pass,
+            config.pub_topic, config.sub_topic, config.ack_topic,
+            config.interval_sec, config.firmware_version
           ];
           db.query(insertQuery, values, (err) => {
             if (err) return reject(err);
@@ -115,14 +111,16 @@ client.on('message', async (topic, message) => {
     if (!device) return;
 
     const powerFactor = parseFloat(data['powerfactor']) || 0;
-
-    // Removed live alert logic here
-
     const now = Date.now();
     const lastInsert = lastInsertTimestamps[device_id] || 0;
-    const interval = 5 * 60 * 1000;
+    
+    // Set to 5 seconds for testing purposes
+    const interval = 5 * 1000; 
 
     if (now - lastInsert >= interval) {
+      // ✅ FIX: Update timer immediately so it doesn't spam if it skips
+      lastInsertTimestamps[device_id] = now; 
+
       const currentKwh = parseFloat(data['Kwh']) || 0;
 
       db.query(
@@ -140,34 +138,40 @@ client.on('message', async (topic, message) => {
             const insertQuery = `
               INSERT INTO device_data (
                 device_id, topic_name, msg_id, timestamp_utc, ts_unix,
-                voltage, current, kw, kwh, kvarhlag,
-                kvarhlead, kvah, kvar, power_factor, created_at
+                voltage, current, kw, kva, kwh, kvarhlag,
+                kvarhlead, kvah, kvar, power_factor,
+                voltage_r, voltage_y, voltage_b,
+                current_r, current_y, current_b,
+                kw_r, kw_y, kw_b,
+                kvar_r, kvar_y, kvar_b,
+                kva_r, kva_y, kva_b,
+                pf_r, pf_y, pf_b,
+                device_status, network_status, created_at
               )
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
             `;
             const values = [
-              device_id,
-              topic,
-              msg_id,
-              timestamp_utc,
-              ts_unix,
-              parseFloat(data['Voltage']) || 0,
-              parseFloat(data['Current']) || 0,
-              parseFloat(data['KW']) || 0,
-              currentKwh,
-              parseFloat(data['Kvarhlag']) || 0,
-              parseFloat(data['Kvarhlead']) || 0,
-              parseFloat(data['kvah']) || 0,
-              parseFloat(data['kvar']) || 0,
-              powerFactor
+              device_id, topic, msg_id, timestamp_utc, ts_unix,
+              parseFloat(data['Voltage']) || 0, parseFloat(data['Current']) || 0,
+              parseFloat(data['KW']) || 0, parseFloat(data['kVA']) || 0, currentKwh,
+              parseFloat(data['Kvarhlag']) || 0, parseFloat(data['Kvarhlead']) || 0,
+              parseFloat(data['kvah']) || 0, parseFloat(data['kvar']) || 0, powerFactor,
+              
+              parseFloat(data['Voltage_R']) || 0, parseFloat(data['Voltage_Y']) || 0, parseFloat(data['Voltage_B']) || 0,
+              parseFloat(data['Current_R']) || 0, parseFloat(data['Current_Y']) || 0, parseFloat(data['Current_B']) || 0,
+              parseFloat(data['KW_R']) || 0, parseFloat(data['KW_Y']) || 0, parseFloat(data['KW_B']) || 0,
+              parseFloat(data['KVAR_R']) || 0, parseFloat(data['KVAR_Y']) || 0, parseFloat(data['KVAR_B']) || 0,
+              parseFloat(data['KVA_R']) || 0, parseFloat(data['KVA_Y']) || 0, parseFloat(data['KVA_B']) || 0,
+              parseFloat(data['PF_R']) || 0, parseFloat(data['PF_Y']) || 0, parseFloat(data['PF_B']) || 0,
+              
+              status || null, network_status || null
             ];
 
             db.query(insertQuery, values, (err) => {
               if (err) {
                 console.error('❌ DB Insert Error:', err.message);
               } else {
-                console.log(`✅ Inserted 5-min data for ${device_id} with KWh: ${currentKwh}`);
-                lastInsertTimestamps[device_id] = now;
+                console.log(`✅ Inserted data for ${device_id} with KWh: ${currentKwh}`);
               }
             });
           } else {
@@ -179,15 +183,37 @@ client.on('message', async (topic, message) => {
 
     const livePayload = {
       device_id,
-      voltage: parseFloat(data['Voltage']) || 230,
-      current: parseFloat(data['Current']) || 12,
+      status: status || 'Unknown',
+      network_status: network_status || 'Unknown',
+      voltage: parseFloat(data['Voltage']) || 0,
+      current: parseFloat(data['Current']) || 0,
       kw: parseFloat(data['KW']) || 0,
+      kva: parseFloat(data['kVA']) || 0,
       kwh: parseFloat(data['Kwh']) || 0,
       kvarhlag: parseFloat(data['Kvarhlag']) || 0,
       kvarhlead: parseFloat(data['Kvarhlead']) || 0,
       kvah: parseFloat(data['kvah']) || 0,
       kvar: parseFloat(data['kvar']) || 0,
       power_factor: powerFactor,
+      
+      voltage_r: parseFloat(data['Voltage_R']) || 0,
+      voltage_y: parseFloat(data['Voltage_Y']) || 0,
+      voltage_b: parseFloat(data['Voltage_B']) || 0,
+      current_r: parseFloat(data['Current_R']) || 0,
+      current_y: parseFloat(data['Current_Y']) || 0,
+      current_b: parseFloat(data['Current_B']) || 0,
+      kw_r: parseFloat(data['KW_R']) || 0,
+      kw_y: parseFloat(data['KW_Y']) || 0,
+      kw_b: parseFloat(data['KW_B']) || 0,
+      kvar_r: parseFloat(data['KVAR_R']) || 0,
+      kvar_y: parseFloat(data['KVAR_Y']) || 0,
+      kvar_b: parseFloat(data['KVAR_B']) || 0,
+      kva_r: parseFloat(data['KVA_R']) || 0,
+      kva_y: parseFloat(data['KVA_Y']) || 0,
+      kva_b: parseFloat(data['KVA_B']) || 0,
+      pf_r: parseFloat(data['PF_R']) || 0,
+      pf_y: parseFloat(data['PF_Y']) || 0,
+      pf_b: parseFloat(data['PF_B']) || 0
     };
     io.emit(`device-data-${device_id}`, livePayload);
 
